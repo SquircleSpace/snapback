@@ -17,7 +17,7 @@ cabal-version:       >=1.10
 
 executable snapback
   main-is:             Main.hs
-  -- other-modules:
+  other-modules:       Snapshot
   -- other-extensions:
   build-depends:       unix, directory, time, filepath, process, base >=4.10 && <4.11
   -- hs-source-dirs:
