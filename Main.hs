@@ -1,6 +1,7 @@
 module Main where
-import Snapshot (snapshot, Snapshotable(..), subvolumePath, snapshotBasePath)
+import Snapshot (takeSnapshot, Snapshotable(..), subvolumePath, snapshotBasePath)
 
+import Control.Exception.Base (displayException)
 import Control.Monad (forM_)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
@@ -24,20 +25,13 @@ snapshotMain args = do
   forM_ subvolumesToSnapshot $ \subvolume -> do
     result <- takeSnapshot subvolume
     case result of
-      Left str -> putStrLn str
+      Left str -> putStrLn $ displayException str
       Right _ -> return ()
 
 data Help =
   Help
   { brief :: String
   , detailed :: String
-  }
-
-snapshotHelp :: Help
-snapshotHelp =
-  Help
-  { brief = "Snapshot all configured subvolumes"
-  , detailed = "Snapshot all configured subvolumes"
   }
 
 data Verb =
@@ -49,9 +43,19 @@ data Verb =
 
 verb name help command = Verb { name = name, help = help, command = command }
 
+snapshotHelp :: Help
+snapshotHelp =
+  Help
+  { brief = "Snapshot all configured subvolumes"
+  , detailed = "Snapshot all configured subvolumes"
+  }
+
+snapshot :: Verb
+snapshot = verb "snapshot" snapshotHelp snapshotMain
+
 verbs :: [Verb]
 verbs =
-  [ verb "snapshot" snapshotHelp snapshotMain
+  [ snapshot
   ]
 
 performVerb :: String -> [String] -> IO ()

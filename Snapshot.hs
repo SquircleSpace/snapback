@@ -1,24 +1,17 @@
 module Snapshot (takeSnapshot, Snapshotable(..)) where
 import Control.Exception (bracket, try, IOException)
-import Control.Monad (forM_)
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Time.Format (formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing, removeFile)
-import System.Exit (ExitCode (..))
 import System.FilePath ((</>), (<.>), splitFileName)
-import System.Posix.IO (openFd, closeFd, OpenFileFlags, defaultFileFlags, OpenMode (ReadOnly), exclusive)
-import System.Posix.Types (Fd)
-import System.Process (CreateProcess, proc, readCreateProcessWithExitCode)
+import System.Posix.IO (openFd, closeFd, defaultFileFlags, OpenMode (ReadOnly), exclusive)
+import System.Linux.Btrfs (snapshot)
 
 data Snapshotable =
   Snapshotable
   { subvolumePath :: FilePath
   , snapshotBasePath :: FilePath
   }
-
-snapshotProcess :: FilePath -> FilePath -> CreateProcess
-snapshotProcess sourcePath destinationPath =
-  proc "btrfs" ["subvolume", "snapshot", "-r", sourcePath, destinationPath]
 
 subpathForTime :: UTCTime -> FilePath
 subpathForTime time =
@@ -42,28 +35,22 @@ mkdirForSnapshotDestination snapshotDestination = do
 lockfilePathForSnapshot :: FilePath -> FilePath
 lockfilePathForSnapshot snapshotPath = snapshotPath <.> "lock"
 
-withLockFile :: FilePath -> IO a -> IO (Either String a)
+catchIOExceptions :: IO a -> IO (Either IOException a)
+catchIOExceptions action = try action
+
+withLockFile :: FilePath -> IO a -> IO a
 withLockFile lockFile action = do
   let flags = defaultFileFlags { exclusive = True }
-  let open = try $ openFd lockFile ReadOnly (Just 0) flags :: IO (Either IOException Fd)
-  let close eitherFd = case eitherFd of
-        Right fd -> closeFd fd >> removeFile lockFile
-        Left _ -> return ()
-  bracket open close $ \eitherFd -> case eitherFd of
-    Right _ -> do
-      value <- action
-      return $ Right value
-    Left _ -> return $ Left "Failed to create lockfile"
+  let open = openFd lockFile ReadOnly (Just 0) flags
+  bracket open closeFd $ \_ -> action
 
-takeSnapshot :: Snapshotable -> IO (Either String ())
+takeSnapshot :: Snapshotable -> IO (Either IOException FilePath)
 takeSnapshot snapshotable = do
   now <- getCurrentTime
   let destinationPath = snapshotDestination snapshotable now
-  let createProcess = snapshotProcess (subvolumePath snapshotable) destinationPath
-  let processAction = readCreateProcessWithExitCode createProcess ""
-  mkdirForSnapshotDestination destinationPath
-  result <- withLockFile (lockfilePathForSnapshot destinationPath) processAction
-  case result of
-    Left e -> return $ Left e
-    Right (ExitSuccess, _, _) -> return $ Right ()
-    Right (ExitFailure _, stdout, stderr) -> return $ Left stderr
+  catchIOExceptions $ do
+    mkdirForSnapshotDestination destinationPath
+    withLockFile (lockfilePathForSnapshot destinationPath) $ do
+      let path = subvolumePath snapshotable
+      snapshot path destinationPath True
+      return path
