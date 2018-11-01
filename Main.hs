@@ -1,5 +1,6 @@
 module Main where
 import Snapshot (takeSnapshot, Snapshotable(..), subvolumePath, snapshotBasePath)
+import SnapshotStore (Subvol(..), findSubvolsInPath)
 
 import Control.Exception.Base (displayException)
 import Control.Monad (forM_)
@@ -53,9 +54,25 @@ snapshotHelp =
 snapshot :: Verb
 snapshot = verb "snapshot" snapshotHelp snapshotMain
 
+listSubvolumesMain :: [String] -> IO ()
+listSubvolumesMain args = do
+  subvols <- findSubvolsInPath "/media/.snapshots"
+  forM_ subvols $ \subvol -> putStrLn $ show subvol
+
+listSubvolumesHelp :: Help
+listSubvolumesHelp =
+  Help
+  { brief = "List subvolumes in the snapshot directory."
+  , detailed = "List subvolumes in the snapshot directory."
+  }
+
+listSubvolumes :: Verb
+listSubvolumes = verb "list" listSubvolumesHelp listSubvolumesMain
+
 verbs :: [Verb]
 verbs =
   [ snapshot
+  , listSubvolumes
   ]
 
 performVerb :: String -> [String] -> IO ()
