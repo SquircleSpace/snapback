@@ -1,9 +1,9 @@
-module SnapshotStore (Subvol(..), findSubvolsInPath) where
+module SnapshotStore (Subvol(..), findSubvolsInPath, lookupSubvolPathToParent, validateSubvol) where
 import Control.Monad (when, liftM, forM)
 import Data.List (isPrefixOf)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, isJust)
 import System.FilePath ((</>), splitFileName)
-import System.Linux.Btrfs (InodeNum, SubvolId, SubvolInfo(..), lookupInode, childSubvols)
+import System.Linux.Btrfs (InodeNum, SubvolId, SubvolInfo(..), lookupInode, childSubvols, getSubvolInfo)
 import System.Posix.Files (getFileStatus, fileID, isDirectory)
 import System.Posix.Types (CIno(..))
 
@@ -60,3 +60,23 @@ findSubvolsInPath path = do
     return $ if pathRelativeToParentSubvol `inodePathIsPrefixOfPath` pathToChild
              then Just childSubvol
              else Nothing
+
+lookupSubvolPathToParent :: Subvol -> IO FilePath
+lookupSubvolPathToParent subvol = do
+  (_, path) <- lookupInode (subvolVolumePath subvol) (subvolParentId subvol) (subvolInodeNum subvol)
+  return $ path </> subvolName subvol
+
+validateSubvol :: Subvol -> Either String Subvol
+validateSubvol subvol = do
+  let info = subvolInfo subvol
+  let ensure condition description =
+        if condition
+        then return subvol
+        else Left description
+  -- System.Linux.Btrfs seems to always claim subvolumes are readwrite
+  -- ensure (siReadOnly info)
+  --   "Snapshot is not readonly"
+  ensure (isJust $ siParSnapGen info)
+    "Subvolume is not a snapshot"
+  ensure (siParSnapGen info == Just (siGeneration info))
+    "Subvolume has been modified"

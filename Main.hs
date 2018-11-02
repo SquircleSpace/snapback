@@ -1,12 +1,13 @@
 module Main where
 import Snapshot (takeSnapshot, Snapshotable(..), subvolumePath, snapshotBasePath)
-import SnapshotStore (Subvol(..), findSubvolsInPath)
+import SnapshotStore (Subvol(..), findSubvolsInPath, lookupSubvolPathToParent, validateSubvol)
 
 import Control.Exception.Base (displayException)
 import Control.Monad (forM_)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
+import System.IO (hPutStrLn, stderr)
 
 standardSnapshotable :: FilePath -> Snapshotable
 standardSnapshotable path =
@@ -57,7 +58,13 @@ snapshot = verb "snapshot" snapshotHelp snapshotMain
 listSubvolumesMain :: [String] -> IO ()
 listSubvolumesMain args = do
   subvols <- findSubvolsInPath "/media/.snapshots"
-  forM_ subvols $ \subvol -> putStrLn $ show subvol
+  forM_ subvols $ \subvol -> do
+    path <- lookupSubvolPathToParent subvol
+    case validateSubvol subvol of
+      Left str -> do
+        hPutStrLn stderr $ "Ignoring " ++ path ++ ": " ++ str
+      Right subvol -> do
+        putStrLn path
 
 listSubvolumesHelp :: Help
 listSubvolumesHelp =
