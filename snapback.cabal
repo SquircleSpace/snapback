@@ -19,6 +19,6 @@ executable snapback
   main-is:             Main.hs
   other-modules:       Snapshot SnapshotStore
   -- other-extensions:
-  build-depends:       btrfs, unix, directory, time, filepath, process, base >=4.10 && <4.11
+  build-depends:       containers, aeson, btrfs, unix, directory, time, filepath, process, base >=4.10 && <4.11
   -- hs-source-dirs:
   default-language:    Haskell2010

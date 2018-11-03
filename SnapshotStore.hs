@@ -1,11 +1,24 @@
-module SnapshotStore (Subvol(..), findSubvolsInPath, lookupSubvolPathToParent, validateSubvol) where
-import Control.Monad (when, liftM, forM)
-import Data.List (isPrefixOf)
+{-# LANGUAGE TemplateHaskell #-}
+
+module SnapshotStore (Subvol(..), SnapshotStore, storeSnapshots, mkSnapshotStore, loadSnapshotStore, loadSnapshotStoreWithFilter, findSubvolsInPath, lookupSubvolPathToParent, validateSubvol) where
+
+import Control.Monad (when, liftM, forM, filterM)
+import Data.Aeson (ToJSON, FromJSON, Array, Value, toJSON, toEncoding, parseJSON, withArray)
+import Data.Aeson.Types (Parser)
+import Data.Aeson.TH (deriveJSON, defaultOptions)
+import Data.Either (isRight)
+import Data.Foldable (foldr')
+import Data.List (isPrefixOf, sortBy)
+import Data.Map.Strict (Map, fromList)
 import Data.Maybe (catMaybes, isJust)
 import System.FilePath ((</>), splitFileName)
 import System.Linux.Btrfs (InodeNum, SubvolId, SubvolInfo(..), lookupInode, childSubvols, getSubvolInfo)
+import System.Linux.Btrfs.UUID (UUID)
 import System.Posix.Files (getFileStatus, fileID, isDirectory)
 import System.Posix.Types (CIno(..))
+
+$(deriveJSON defaultOptions ''UUID)
+$(deriveJSON defaultOptions ''SubvolInfo)
 
 data Subvol =
   Subvol
@@ -16,6 +29,47 @@ data Subvol =
   , subvolVolumePath :: FilePath
   , subvolInfo :: SubvolInfo
   } deriving (Eq, Show)
+
+$(deriveJSON defaultOptions ''Subvol)
+
+data SnapshotStore =
+  SnapshotStore
+  { storeSnapshots :: [Subvol]
+  , storeSnapshotsById :: Map SubvolId Subvol
+  } deriving (Eq)
+
+mkSnapshotStore :: [Subvol] -> SnapshotStore
+mkSnapshotStore subvols =
+  SnapshotStore
+  { storeSnapshots = sortBy dateCompare subvols
+  , storeSnapshotsById = fromList $ map mkPair subvols
+  }
+  where
+    date = siOTime . subvolInfo
+    dateCompare left right = compare (date left) (date right)
+    mkPair subvol = (subvolId subvol, subvol)
+
+loadSnapshotStoreWithFilter :: FilePath -> (Subvol -> IO Bool) -> IO SnapshotStore
+loadSnapshotStoreWithFilter path filter = do
+  findSubvolsInPath path >>= filterM filter >>= return . mkSnapshotStore
+
+defaultSnapshotStoreFilter :: Subvol -> IO Bool
+defaultSnapshotStoreFilter = return . isRight . validateSubvol
+
+loadSnapshotStore :: FilePath -> IO SnapshotStore
+loadSnapshotStore path = loadSnapshotStoreWithFilter path defaultSnapshotStoreFilter
+
+instance ToJSON SnapshotStore where
+  toJSON = toJSON . storeSnapshots
+  toEncoding = toEncoding . storeSnapshots
+
+instance FromJSON SnapshotStore where
+  parseJSON = withArray "SnapshotStore" parse
+    where
+      parse :: Array -> Parser SnapshotStore
+      parse array = mkSnapshotStore <$> foldr' parseAndCons (return []) array
+      parseAndCons :: Value -> Parser [Subvol] -> Parser [Subvol]
+      parseAndCons value existingParser = (:) <$> parseJSON value <*> existingParser
 
 convertCIno :: CIno -> InodeNum
 convertCIno (CIno no) = no
