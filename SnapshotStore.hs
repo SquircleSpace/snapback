@@ -1,6 +1,19 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module SnapshotStore (Subvol(..), SnapshotStore, storeSnapshots, mkSnapshotStore, loadSnapshotStore, loadSnapshotStoreWithFilter, findSubvolsInPath, lookupSubvolPathToParent, validateSubvol) where
+module SnapshotStore
+  ( Subvol(..)
+  , SnapshotStore
+  , Local
+  , Remote
+  , storeSnapshots
+  , mkSnapshotStore
+  , loadSnapshotStore
+  , loadSnapshotStoreWithFilter
+  , findSubvolsInPath
+  , lookupSubvolPathToParent
+  , validateSubvol
+  , compareStores
+  ) where
 
 import Control.Monad (when, liftM, forM, filterM)
 import Data.Aeson (ToJSON, FromJSON, Array, Value, toJSON, toEncoding, parseJSON, withArray)
@@ -9,7 +22,7 @@ import Data.Aeson.TH (deriveJSON, defaultOptions)
 import Data.Either (isRight)
 import Data.Foldable (foldr')
 import Data.List (isPrefixOf, sortBy)
-import Data.Map.Strict (Map, fromList)
+import Data.Map.Strict (Map, fromList, intersectionWith, elems, difference)
 import Data.Maybe (catMaybes, isJust)
 import System.FilePath ((</>), splitFileName)
 import System.Linux.Btrfs (InodeNum, SubvolId, SubvolInfo(..), lookupInode, childSubvols, getSubvolInfo)
@@ -36,18 +49,40 @@ data SnapshotStore =
   SnapshotStore
   { storeSnapshots :: [Subvol]
   , storeSnapshotsById :: Map SubvolId Subvol
+  , storeSnapshotsByUUID :: Map UUID Subvol
+  , storeSnapshotsByReceivedUUID :: Map UUID Subvol
   } deriving (Eq)
 
 mkSnapshotStore :: [Subvol] -> SnapshotStore
 mkSnapshotStore subvols =
   SnapshotStore
   { storeSnapshots = sortBy dateCompare subvols
-  , storeSnapshotsById = fromList $ map mkPair subvols
+  , storeSnapshotsById = fromList $ map mkIdPair subvols
+  , storeSnapshotsByUUID = fromList $ catMaybes $ map mkUUIDPair subvols
+  , storeSnapshotsByReceivedUUID = fromList $ catMaybes $ map mkReceivedUUIDPair subvols
   }
   where
     date = siOTime . subvolInfo
     dateCompare left right = compare (date left) (date right)
-    mkPair subvol = (subvolId subvol, subvol)
+    mkIdPair subvol = (subvolId subvol, subvol)
+    mkUUIDPair subvol = fmap (\uuid -> (uuid, subvol)) . siUuid . subvolInfo $ subvol
+    mkReceivedUUIDPair subvol = fmap (\uuid -> (uuid, subvol)) . siReceivedUuid . subvolInfo $ subvol
+
+newtype Local a = Local { fromLocal :: a }
+newtype Remote a = Remote { fromRemote :: a }
+
+compareStores :: Local SnapshotStore -> Remote SnapshotStore -> ([Local Subvol], [(Local Subvol, Remote Subvol)])
+compareStores local remote = (localOnly, common)
+  where commonUUIDs = intersectionWith combine localUUIDMap remoteUUIDMap
+        combine l r = (Local l, Remote r)
+        common = elems commonUUIDs
+        localOnlyUUIDs = difference localUUIDMap remoteUUIDMap
+        localOnly = map Local $ filter isNotReceived $ elems localOnlyUUIDs
+        isNotReceived = not . isJust . siReceivedUuid . subvolInfo
+        localStore = fromLocal local
+        remoteStore = fromRemote remote
+        localUUIDMap = storeSnapshotsByUUID localStore
+        remoteUUIDMap = storeSnapshotsByReceivedUUID remoteStore
 
 loadSnapshotStoreWithFilter :: FilePath -> (Subvol -> IO Bool) -> IO SnapshotStore
 loadSnapshotStoreWithFilter path filter = do
