@@ -1,17 +1,23 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Snapshot (takeSnapshot, Snapshotable(..)) where
+
 import Control.Exception (bracket, try, IOException)
+import Data.Aeson.TH (deriveJSON, defaultOptions)
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Time.Format (formatTime, defaultTimeLocale)
 import System.Directory (createDirectoryIfMissing, removeFile)
 import System.FilePath ((</>), (<.>), splitFileName)
-import System.Posix.IO (openFd, closeFd, defaultFileFlags, OpenMode (ReadOnly), exclusive)
 import System.Linux.Btrfs (snapshot)
+import System.Posix.IO (openFd, closeFd, defaultFileFlags, OpenMode (ReadOnly), exclusive)
 
 data Snapshotable =
   Snapshotable
   { subvolumePath :: FilePath
   , snapshotBasePath :: FilePath
-  }
+  } deriving (Eq, Show)
+
+$(deriveJSON defaultOptions ''Snapshotable)
 
 subpathForTime :: UTCTime -> FilePath
 subpathForTime time =

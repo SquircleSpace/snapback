@@ -1,5 +1,5 @@
-{ mkDerivation, aeson, base, btrfs, containers, directory, filepath
-, process, stdenv, time, unix
+{ mkDerivation, aeson, base, btrfs, bytestring, containers
+, directory, filepath, process, stdenv, time, unix, yaml
 }:
 mkDerivation {
   pname = "snapback";
@@ -8,7 +8,8 @@ mkDerivation {
   isLibrary = false;
   isExecutable = true;
   executableHaskellDepends = [
-    aeson base btrfs containers directory filepath process time unix
+    aeson base btrfs bytestring containers directory filepath process
+    time unix yaml
   ];
   license = stdenv.lib.licenses.asl20;
 }

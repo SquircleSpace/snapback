@@ -1,6 +1,7 @@
 module Main where
 import Snapshot (takeSnapshot, Snapshotable(..), subvolumePath, snapshotBasePath)
 import SnapshotStore (Subvol(..), loadSnapshotStoreWithFilter, storeSnapshots, lookupSubvolPathToParent, validateSubvol)
+import GlobalConfig (GlobalConfig, defaultGlobalConfig, configBackupList)
 
 import Control.Exception.Base (displayException)
 import Control.Monad (forM_)
@@ -11,8 +12,6 @@ import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr, stdout)
-
-data GlobalConfig = GlobalConfig
 
 type VerbCommand = GlobalConfig -> [String] -> IO ()
 
@@ -47,9 +46,12 @@ subvolumesToSnapshot =
     standardSnapshotable "/media"
   ]
 
+globalConfig :: GlobalConfig
+globalConfig = defaultGlobalConfig { configBackupList = subvolumesToSnapshot }
+
 snapshotMain :: VerbCommand
-snapshotMain _ args = do
-  forM_ subvolumesToSnapshot $ \subvolume -> do
+snapshotMain config args = do
+  forM_ (configBackupList config) $ \subvolume -> do
     result <- takeSnapshot subvolume
     case result of
       Left str -> putStrLn $ displayException str
@@ -60,17 +62,20 @@ snapshotVerb = ("snapshot", (mkVerbInfo snapshotMain) {verbBriefHelp = Just help
   where help = "Take a snapshot right now"
 
 listMain :: VerbCommand
-listMain _ args = do
-  snapshotStore <- loadSnapshotStoreWithFilter "/media/.snapshots" $ \subvol -> do
-    case validateSubvol subvol of
-      Right _ -> return True
-      Left str -> do
-        path <- lookupSubvolPathToParent subvol
-        hPutStrLn stderr $ "Ignoring " ++ path ++ ": " ++ str
-        return False
-  forM_ (storeSnapshots snapshotStore) $ \subvol -> do
-    path <- lookupSubvolPathToParent subvol
-    putStrLn path
+listMain config args = do
+  forM_ (configBackupList config) $ \snapshotable -> do
+    putStrLn $ snapshotBasePath snapshotable ++ ":"
+    let snapshotStorePath = subvolumePath snapshotable
+    snapshotStore <- loadSnapshotStoreWithFilter snapshotStorePath $ \subvol -> do
+      case validateSubvol subvol of
+        Right _ -> return True
+        Left str -> do
+          path <- lookupSubvolPathToParent subvol
+          hPutStrLn stderr $ "Ignoring " ++ path ++ ": " ++ str
+          return False
+    forM_ (storeSnapshots snapshotStore) $ \subvol -> do
+      path <- lookupSubvolPathToParent subvol
+      putStrLn path
 
 listVerb :: Verb
 listVerb = ("list", (mkVerbInfo listMain) {verbBriefHelp = Just help})
@@ -106,6 +111,7 @@ performVerb verbName = fromMaybe (usageVerb $ Just verbName) $ command
 main :: IO ()
 main = do
   args <- getArgs
+  let config = globalConfig
   case args of
-    [] -> usageVerb Nothing GlobalConfig []
-    (verbName : otherArgs) -> performVerb verbName GlobalConfig otherArgs
+    [] -> usageVerb Nothing config []
+    (verbName : otherArgs) -> performVerb verbName config otherArgs
