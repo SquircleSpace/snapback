@@ -4,10 +4,35 @@ import SnapshotStore (Subvol(..), loadSnapshotStoreWithFilter, storeSnapshots, l
 
 import Control.Exception.Base (displayException)
 import Control.Monad (forM_)
+import Data.Map.Strict (Map, fromList, assocs)
+import qualified Data.Map.Strict as Map (lookup)
+import Data.Maybe (fromMaybe)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
-import System.IO (hPutStrLn, stderr)
+import System.IO (hPutStrLn, stderr, stdout)
+
+data GlobalConfig = GlobalConfig
+
+type VerbCommand = GlobalConfig -> [String] -> IO ()
+
+data VerbInfo =
+  VerbInfo
+  { verbCommand :: VerbCommand
+  , verbBriefHelp :: Maybe String
+  , verbDetailedHelp :: Maybe String
+  }
+
+mkVerbInfo :: VerbCommand -> VerbInfo
+mkVerbInfo command =
+  VerbInfo
+  { verbCommand = command
+  , verbBriefHelp = Nothing
+  , verbDetailedHelp = Nothing
+  }
+
+type VerbTable = Map String VerbInfo
+type Verb = (String, VerbInfo)
 
 standardSnapshotable :: FilePath -> Snapshotable
 standardSnapshotable path =
@@ -22,41 +47,20 @@ subvolumesToSnapshot =
     standardSnapshotable "/media"
   ]
 
-snapshotMain :: [String] -> IO ()
-snapshotMain args = do
+snapshotMain :: VerbCommand
+snapshotMain _ args = do
   forM_ subvolumesToSnapshot $ \subvolume -> do
     result <- takeSnapshot subvolume
     case result of
       Left str -> putStrLn $ displayException str
       Right _ -> return ()
 
-data Help =
-  Help
-  { brief :: String
-  , detailed :: String
-  }
+snapshotVerb :: Verb
+snapshotVerb = ("snapshot", (mkVerbInfo snapshotMain) {verbBriefHelp = Just help})
+  where help = "Take a snapshot right now"
 
-data Verb =
-  Verb
-  { name :: String
-  , help :: Help
-  , command :: [String] -> IO ()
-  }
-
-verb name help command = Verb { name = name, help = help, command = command }
-
-snapshotHelp :: Help
-snapshotHelp =
-  Help
-  { brief = "Snapshot all configured subvolumes"
-  , detailed = "Snapshot all configured subvolumes"
-  }
-
-snapshot :: Verb
-snapshot = verb "snapshot" snapshotHelp snapshotMain
-
-listSubvolumesMain :: [String] -> IO ()
-listSubvolumesMain args = do
+listMain :: VerbCommand
+listMain _ args = do
   snapshotStore <- loadSnapshotStoreWithFilter "/media/.snapshots" $ \subvol -> do
     case validateSubvol subvol of
       Right _ -> return True
@@ -68,42 +72,40 @@ listSubvolumesMain args = do
     path <- lookupSubvolPathToParent subvol
     putStrLn path
 
-listSubvolumesHelp :: Help
-listSubvolumesHelp =
-  Help
-  { brief = "List subvolumes in the snapshot directory."
-  , detailed = "List subvolumes in the snapshot directory."
-  }
+listVerb :: Verb
+listVerb = ("list", (mkVerbInfo listMain) {verbBriefHelp = Just help})
+  where help = "List subvolumes in the snapshot directory."
 
-listSubvolumes :: Verb
-listSubvolumes = verb "list" listSubvolumesHelp listSubvolumesMain
-
-verbs :: [Verb]
-verbs =
-  [ snapshot
-  , listSubvolumes
+verbs :: VerbTable
+verbs = fromList
+  [ snapshotVerb
+  , listVerb
   ]
 
-performVerb :: String -> [String] -> IO ()
-performVerb verbName args = search verbs
-  where search [] = printUsage >> exitFailure
-        search (currentVerb : restVerbs) =
-          if name currentVerb == verbName
-          then command currentVerb args
-          else search restVerbs
+usageVerb :: Maybe String -> VerbCommand
+usageVerb verbName _ _ = do
+  let isBad = case verbName of
+                Nothing -> False
+                Just _ -> True
+  let stream = if isBad then stderr else stdout
+  case verbName of
+    Nothing -> hPutStrLn stream "You must specify a command to perform"
+    Just name -> hPutStrLn stream $ "Unknown command: " ++ name
+  hPutStrLn stream "Commands:"
+  forM_ (assocs verbs) $ \(name, info) ->
+    case verbBriefHelp info of
+      Nothing -> hPutStrLn stream name
+      Just help -> hPutStrLn stream $ name ++ ": " ++ help
+  if isBad then exitFailure else return ()
 
-printUsage :: IO ()
-printUsage = do
-  putStrLn "Usage: snapback <command> [args..]"
-  putStrLn "Valid commands:"
-  forM_ verbs $ \verb -> do
-    putStr $ name verb
-    putStr ": "
-    putStrLn $ brief $ help verb
+performVerb :: String -> VerbCommand
+performVerb verbName = fromMaybe (usageVerb $ Just verbName) $ command
+  where info = Map.lookup verbName verbs
+        command = fmap verbCommand info
 
 main :: IO ()
 main = do
   args <- getArgs
   case args of
-    [] -> printUsage >> exitFailure
-    (verbName : otherArgs) -> performVerb verbName otherArgs
+    [] -> usageVerb Nothing GlobalConfig []
+    (verbName : otherArgs) -> performVerb verbName GlobalConfig otherArgs
