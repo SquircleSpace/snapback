@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, OverloadedStrings #-}
 
 module GlobalConfig
   ( GlobalConfig
@@ -10,8 +10,8 @@ module GlobalConfig
 
 import Snapshot (Snapshotable)
 
-import Data.Aeson (ToJSON, FromJSON)
-import Data.Aeson.TH (deriveJSON, defaultOptions)
+import Data.Aeson (FromJSON, (.:?), (.!=), parseJSON, withObject)
+import Data.Aeson.TH (deriveToJSON, defaultOptions)
 import Data.ByteString (ByteString)
 import Data.Yaml (ParseException, decodeEither', decodeFileEither)
 
@@ -20,12 +20,20 @@ data GlobalConfig =
   { configBackupList :: [Snapshotable]
   } deriving (Eq, Show)
 
-$(deriveJSON defaultOptions ''GlobalConfig)
+$(deriveToJSON defaultOptions ''GlobalConfig)
 
+defaultGlobalConfig :: GlobalConfig
 defaultGlobalConfig =
   GlobalConfig
   { configBackupList = []
   }
+
+defaultFor :: (GlobalConfig -> a) -> a
+defaultFor fn = fn defaultGlobalConfig
+
+instance FromJSON GlobalConfig where
+  parseJSON = withObject "GlobalConfig" $ \object ->
+    GlobalConfig <$> object .:? "configBackupList" .!= defaultFor configBackupList
 
 loadGlobalConfig :: ByteString -> Either ParseException GlobalConfig
 loadGlobalConfig = decodeEither'
