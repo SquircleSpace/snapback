@@ -1,5 +1,5 @@
 module Main where
-import Snapshot (takeSnapshot, Snapshotable(..), subvolumePath, snapshotBasePath)
+import Snapshot (Snapshotable(..), takeSnapshot, snapshotBasePath)
 import SnapshotStore (Subvol(..), loadSnapshotStoreWithFilter, storeSnapshots, lookupSubvolPathToParent, validateSubvol)
 import GlobalConfig (GlobalConfig, defaultGlobalConfig, configBackupList)
 
@@ -70,12 +70,10 @@ listMain config args = do
       case validateSubvol subvol of
         Right _ -> return True
         Left str -> do
-          path <- lookupSubvolPathToParent subvol
-          hPutStrLn stderr $ "Ignoring " ++ path ++ ": " ++ str
+          hPutStrLn stderr $ "Ignoring " ++ subvolPath subvol ++ ": " ++ str
           return False
     forM_ (storeSnapshots snapshotStore) $ \subvol -> do
-      path <- lookupSubvolPathToParent subvol
-      putStrLn path
+      putStrLn $ subvolName subvol
 
 listVerb :: Verb
 listVerb = ("list", (mkVerbInfo listMain) {verbBriefHelp = Just help})

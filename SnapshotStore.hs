@@ -21,7 +21,7 @@ import Data.Aeson.Types (Parser)
 import Data.Aeson.TH (deriveJSON, defaultOptions)
 import Data.Either (isRight)
 import Data.Foldable (foldr')
-import Data.List (isPrefixOf, sortBy)
+import Data.List (stripPrefix, sortBy)
 import Data.Map.Strict (Map, fromList, intersectionWith, elems, difference)
 import Data.Maybe (catMaybes, isJust)
 import System.FilePath ((</>), splitFileName)
@@ -40,6 +40,7 @@ data Subvol =
   , subvolInodeNum :: InodeNum
   , subvolName :: FilePath
   , subvolVolumePath :: FilePath
+  , subvolPath :: FilePath
   , subvolInfo :: SubvolInfo
   } deriving (Eq, Show)
 
@@ -125,9 +126,8 @@ getPathRelativeToSubvol path = do
     then lookupInode path 0 (convertCIno $ fileID status)
     else getPathToFileRelativeToSubvol path
 
-inodePathIsPrefixOfPath :: FilePath -> FilePath -> Bool
-inodePathIsPrefixOfPath inodePath otherInodePath =
-  cooked inodePath `isPrefixOf` cooked otherInodePath
+inodePathStripPrefix :: FilePath -> FilePath -> Maybe FilePath
+inodePathStripPrefix prefix path = stripPrefix (cooked prefix) path
   where cooked path = if path == "/" then "" else path
 
 findSubvolsInPath :: FilePath -> IO [Subvol]
@@ -136,19 +136,20 @@ findSubvolsInPath path = do
   children <- childSubvols path parentSubvolId
   liftM catMaybes $ forM children $ \(childId, childInodeNum, childName) -> do
     info <- getSubvolInfo path childId
-    let childSubvol =
+    (_, pathToChild) <- lookupInode path parentSubvolId childInodeNum
+    case inodePathStripPrefix pathRelativeToParentSubvol pathToChild of
+      Nothing -> return Nothing
+      Just relativeSubvolPath -> do
+        return $ Just $
           Subvol
           { subvolId = childId
           , subvolParentId = parentSubvolId
           , subvolInodeNum = childInodeNum
           , subvolName = childName
           , subvolVolumePath = path
+          , subvolPath = path </> relativeSubvolPath </> childName
           , subvolInfo = info
           }
-    (_, pathToChild) <- lookupInode path parentSubvolId (subvolInodeNum childSubvol)
-    return $ if pathRelativeToParentSubvol `inodePathIsPrefixOfPath` pathToChild
-             then Just childSubvol
-             else Nothing
 
 lookupSubvolPathToParent :: Subvol -> IO FilePath
 lookupSubvolPathToParent subvol = do
