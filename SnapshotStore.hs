@@ -21,10 +21,10 @@ import Data.Aeson.Types (Parser)
 import Data.Aeson.TH (deriveJSON, defaultOptions)
 import Data.Either (isRight)
 import Data.Foldable (foldr')
-import Data.List (stripPrefix, sortBy)
+import Data.List (sortBy)
 import Data.Map.Strict (Map, fromList, intersectionWith, elems, difference)
 import Data.Maybe (catMaybes, isJust)
-import System.FilePath ((</>), splitFileName)
+import System.FilePath ((</>), splitFileName, makeRelative, isRelative)
 import System.Linux.Btrfs (InodeNum, SubvolId, SubvolInfo(..), lookupInode, childSubvols, getSubvolInfo)
 import System.Linux.Btrfs.UUID (UUID)
 import System.Posix.Files (getFileStatus, fileID, isDirectory)
@@ -145,8 +145,9 @@ getPathRelativeToSubvol path = do
     else getPathToFileRelativeToSubvol path
 
 inodePathStripPrefix :: FilePath -> FilePath -> Maybe FilePath
-inodePathStripPrefix prefix path = stripPrefix (cooked prefix) path
-  where cooked path = if path == "/" then "" else path
+inodePathStripPrefix prefix path = let
+  relative = makeRelative prefix path
+  in if isRelative relative then Just relative else Nothing
 
 findSubvolsInPath :: FilePath -> IO [Subvol]
 findSubvolsInPath path = do
