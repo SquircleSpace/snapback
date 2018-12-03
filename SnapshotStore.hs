@@ -46,21 +46,29 @@ data Subvol =
 
 $(deriveJSON defaultOptions ''Subvol)
 
-data SnapshotStore =
-  SnapshotStore
-  { storeSnapshots :: [Subvol]
-  , storeSnapshotsById :: Map SubvolId Subvol
-  , storeSnapshotsByUUID :: Map UUID Subvol
-  , storeSnapshotsByReceivedUUID :: Map UUID Subvol
+data SubvolTable =
+  SubvolTable
+  { tableSubvols :: [Subvol]
+  , tableSubvolsById :: Map SubvolId Subvol
+  , tableSubvolsByUUID :: Map UUID Subvol
+  , tableSubvolsByReceivedUUID :: Map UUID Subvol
   } deriving (Eq)
 
-mkSnapshotStore :: [Subvol] -> SnapshotStore
-mkSnapshotStore subvols =
+data SnapshotStore =
   SnapshotStore
-  { storeSnapshots = sortBy dateCompare subvols
-  , storeSnapshotsById = fromList $ map mkIdPair subvols
-  , storeSnapshotsByUUID = fromList $ catMaybes $ map mkUUIDPair subvols
-  , storeSnapshotsByReceivedUUID = fromList $ catMaybes $ map mkReceivedUUIDPair subvols
+  { storeSubvolTable :: SubvolTable
+  , storePath :: FilePath
+  } deriving (Eq)
+
+$(deriveJSON defaultOptions ''SnapshotStore)
+
+mkSubvolTable :: [Subvol] -> SubvolTable
+mkSubvolTable subvols =
+  SubvolTable
+  { tableSubvols = sortBy dateCompare subvols
+  , tableSubvolsById = fromList $ map mkIdPair subvols
+  , tableSubvolsByUUID = fromList $ catMaybes $ map mkUUIDPair subvols
+  , tableSubvolsByReceivedUUID = fromList $ catMaybes $ map mkReceivedUUIDPair subvols
   }
   where
     date = siOTime . subvolInfo
@@ -68,6 +76,16 @@ mkSnapshotStore subvols =
     mkIdPair subvol = (subvolId subvol, subvol)
     mkUUIDPair subvol = fmap (\uuid -> (uuid, subvol)) . siUuid . subvolInfo $ subvol
     mkReceivedUUIDPair subvol = fmap (\uuid -> (uuid, subvol)) . siReceivedUuid . subvolInfo $ subvol
+
+mkSnapshotStore :: FilePath -> [Subvol] -> SnapshotStore
+mkSnapshotStore path subvols =
+  SnapshotStore
+  { storeSubvolTable = mkSubvolTable subvols
+  , storePath = path
+  }
+
+storeSnapshots :: SnapshotStore -> [Subvol]
+storeSnapshots = tableSubvols . storeSubvolTable
 
 newtype Local a = Local { fromLocal :: a }
 newtype Remote a = Remote { fromRemote :: a }
@@ -82,12 +100,12 @@ compareStores local remote = (localOnly, common)
         isNotReceived = not . isJust . siReceivedUuid . subvolInfo
         localStore = fromLocal local
         remoteStore = fromRemote remote
-        localUUIDMap = storeSnapshotsByUUID localStore
-        remoteUUIDMap = storeSnapshotsByReceivedUUID remoteStore
+        localUUIDMap = tableSubvolsByUUID $ storeSubvolTable localStore
+        remoteUUIDMap = tableSubvolsByReceivedUUID $ storeSubvolTable remoteStore
 
 loadSnapshotStoreWithFilter :: FilePath -> (Subvol -> IO Bool) -> IO SnapshotStore
 loadSnapshotStoreWithFilter path filter = do
-  findSubvolsInPath path >>= filterM filter >>= return . mkSnapshotStore
+  findSubvolsInPath path >>= filterM filter >>= return . mkSnapshotStore path
 
 defaultSnapshotStoreFilter :: Subvol -> IO Bool
 defaultSnapshotStoreFilter = return . isRight . validateSubvol
@@ -95,15 +113,15 @@ defaultSnapshotStoreFilter = return . isRight . validateSubvol
 loadSnapshotStore :: FilePath -> IO SnapshotStore
 loadSnapshotStore path = loadSnapshotStoreWithFilter path defaultSnapshotStoreFilter
 
-instance ToJSON SnapshotStore where
-  toJSON = toJSON . storeSnapshots
-  toEncoding = toEncoding . storeSnapshots
+instance ToJSON SubvolTable where
+  toJSON = toJSON . tableSubvols
+  toEncoding = toEncoding . tableSubvols
 
-instance FromJSON SnapshotStore where
-  parseJSON = withArray "SnapshotStore" parse
+instance FromJSON SubvolTable where
+  parseJSON = withArray "SubvolTable" parse
     where
-      parse :: Array -> Parser SnapshotStore
-      parse array = mkSnapshotStore <$> foldr' parseAndCons (return []) array
+      parse :: Array -> Parser SubvolTable
+      parse array = mkSubvolTable <$> foldr' parseAndCons (return []) array
       parseAndCons :: Value -> Parser [Subvol] -> Parser [Subvol]
       parseAndCons value existingParser = (:) <$> parseJSON value <*> existingParser
 
