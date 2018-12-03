@@ -21,14 +21,10 @@ $(deriveJSON defaultOptions ''Snapshotable)
 
 subpathForTime :: UTCTime -> FilePath
 subpathForTime time =
-  year </> month </> day </> timePart
+  format "%Y-%m-%d-%T"
   where
     format :: String -> String
     format str = formatTime defaultTimeLocale str time
-    year = format "%Y"
-    month = format "%m"
-    day = format "%d"
-    timePart = format "%T"
 
 snapshotDestination :: Snapshotable -> UTCTime -> FilePath
 snapshotDestination snapshotable time = snapshotBasePath snapshotable </> subpathForTime time
