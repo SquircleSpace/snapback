@@ -1,7 +1,8 @@
 module Main where
+import GlobalConfig (GlobalConfig, defaultGlobalConfig, configBackupList)
+import Send ()
 import Snapshot (Snapshotable(..), takeSnapshot, snapshotBasePath)
 import SnapshotStore (Subvol(..), loadSnapshotStoreWithFilter, storeSnapshots, lookupSubvolPathToParent, validateSubvol)
-import GlobalConfig (GlobalConfig, defaultGlobalConfig, configBackupList)
 
 import Control.Exception.Base (displayException)
 import Control.Monad (forM_)

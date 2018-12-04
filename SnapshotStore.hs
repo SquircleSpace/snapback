@@ -6,6 +6,7 @@ module SnapshotStore
   , Local(..)
   , Remote(..)
   , storeSnapshots
+  , storePath
   , mkSnapshotStore
   , loadSnapshotStore
   , loadSnapshotStoreWithFilter
