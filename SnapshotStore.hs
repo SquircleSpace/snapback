@@ -3,8 +3,8 @@
 module SnapshotStore
   ( Subvol(..)
   , SnapshotStore
-  , Local
-  , Remote
+  , Local(..)
+  , Remote(..)
   , storeSnapshots
   , mkSnapshotStore
   , loadSnapshotStore
