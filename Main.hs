@@ -85,10 +85,18 @@ listVerb :: Verb
 listVerb = ("list", (mkVerbInfo listMain) {verbBriefHelp = Just help})
   where help = "List subvolumes in the snapshot directory."
 
+helpVerb :: Verb
+helpVerb = ("help", (mkVerbInfo helpMain) {verbBriefHelp = Just help})
+  where help = "Show this"
+
+helpMain :: (MonadIO m) => [String] -> m ()
+helpMain _ = usageVerb Nothing []
+
 verbs :: VerbTable
 verbs = fromList
   [ snapshotVerb
   , listVerb
+  , helpVerb
   ]
 
 usageVerb :: (MonadIO m) => Maybe String -> [String] -> m ()
