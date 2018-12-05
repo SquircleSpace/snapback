@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, FlexibleContexts #-}
 
 module SnapshotStore
   ( Subvol(..)
@@ -17,9 +17,10 @@ module SnapshotStore
   ) where
 
 import Control.Monad (when, liftM, forM, filterM)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Aeson (ToJSON, FromJSON, Array, Value, toJSON, toEncoding, parseJSON, withArray)
-import Data.Aeson.Types (Parser)
 import Data.Aeson.TH (deriveJSON, defaultOptions)
+import Data.Aeson.Types (Parser)
 import Data.Either (isRight)
 import Data.Foldable (foldr')
 import Data.List (sortBy)
@@ -104,14 +105,14 @@ compareStores local remote = (localOnly, common)
         localUUIDMap = tableSubvolsByUUID $ storeSubvolTable localStore
         remoteUUIDMap = tableSubvolsByReceivedUUID $ storeSubvolTable remoteStore
 
-loadSnapshotStoreWithFilter :: FilePath -> (Subvol -> IO Bool) -> IO SnapshotStore
+loadSnapshotStoreWithFilter :: MonadIO m => FilePath -> (Subvol -> m Bool) -> m SnapshotStore
 loadSnapshotStoreWithFilter path filter = do
   findSubvolsInPath path >>= filterM filter >>= return . mkSnapshotStore path
 
-defaultSnapshotStoreFilter :: Subvol -> IO Bool
+defaultSnapshotStoreFilter :: MonadIO m => Subvol -> m Bool
 defaultSnapshotStoreFilter = return . isRight . validateSubvol
 
-loadSnapshotStore :: FilePath -> IO SnapshotStore
+loadSnapshotStore :: MonadIO m => FilePath -> m SnapshotStore
 loadSnapshotStore path = loadSnapshotStoreWithFilter path defaultSnapshotStoreFilter
 
 instance ToJSON SubvolTable where
@@ -129,20 +130,20 @@ instance FromJSON SubvolTable where
 convertCIno :: CIno -> InodeNum
 convertCIno (CIno no) = no
 
-getPathToFileRelativeToSubvol :: FilePath -> IO (SubvolId, FilePath)
+getPathToFileRelativeToSubvol :: MonadIO m => FilePath -> m (SubvolId, FilePath)
 getPathToFileRelativeToSubvol path = do
   let (containingDir, fileName) = splitFileName path
   when ("" == fileName) $ do
-    ioError $ userError $ path ++ " is not a directory"
+    liftIO $ ioError $ userError $ path ++ " is not a directory"
 
   (subvolId, directoryPath) <- getPathRelativeToSubvol containingDir
   return $ (subvolId, directoryPath </> fileName)
 
-getPathRelativeToSubvol :: FilePath -> IO (SubvolId, FilePath)
+getPathRelativeToSubvol :: MonadIO m => FilePath -> m (SubvolId, FilePath)
 getPathRelativeToSubvol path = do
-  status <- getFileStatus path
+  status <- liftIO $ getFileStatus path
   if isDirectory status
-    then lookupInode path 0 (convertCIno $ fileID status)
+    then liftIO $ lookupInode path 0 (convertCIno $ fileID status)
     else getPathToFileRelativeToSubvol path
 
 inodePathStripPrefix :: FilePath -> FilePath -> Maybe FilePath
@@ -150,13 +151,13 @@ inodePathStripPrefix prefix path = let
   relative = makeRelative prefix path
   in if isRelative relative then Just relative else Nothing
 
-findSubvolsInPath :: FilePath -> IO [Subvol]
+findSubvolsInPath :: MonadIO m => FilePath -> m [Subvol]
 findSubvolsInPath path = do
   (parentSubvolId, pathRelativeToParentSubvol) <- getPathRelativeToSubvol path
-  children <- childSubvols path parentSubvolId
+  children <- liftIO $ childSubvols path parentSubvolId
   liftM catMaybes $ forM children $ \(childId, childInodeNum, childName) -> do
-    info <- getSubvolInfo path childId
-    (_, pathToChild) <- lookupInode path parentSubvolId childInodeNum
+    info <- liftIO $ getSubvolInfo path childId
+    (_, pathToChild) <- liftIO $ lookupInode path parentSubvolId childInodeNum
     case inodePathStripPrefix pathRelativeToParentSubvol pathToChild of
       Nothing -> return Nothing
       Just relativeSubvolPath -> do
@@ -171,9 +172,9 @@ findSubvolsInPath path = do
           , subvolInfo = info
           }
 
-lookupSubvolPathToParent :: Subvol -> IO FilePath
+lookupSubvolPathToParent :: MonadIO m => Subvol -> m FilePath
 lookupSubvolPathToParent subvol = do
-  (_, path) <- lookupInode (subvolVolumePath subvol) (subvolParentId subvol) (subvolInodeNum subvol)
+  (_, path) <- liftIO $ lookupInode (subvolVolumePath subvol) (subvolParentId subvol) (subvolInodeNum subvol)
   return $ path </> subvolName subvol
 
 validateSubvol :: Subvol -> Either String Subvol

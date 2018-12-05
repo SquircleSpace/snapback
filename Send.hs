@@ -12,8 +12,8 @@ import SnapshotStore (Subvol(..), SnapshotStore, Local(..), Remote(..), compareS
 
 import Control.Concurrent.Thread (forkIO)
 import Control.Monad (when, unless)
-import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Except (MonadError, throwError, runExceptT)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import System.Exit (ExitCode(..))
 import System.FilePath ((</>), makeRelative, isRelative)
 import System.IO (Handle)

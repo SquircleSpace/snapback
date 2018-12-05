@@ -1,20 +1,23 @@
 module Main where
-import GlobalConfig (GlobalConfig, defaultGlobalConfig, configBackupList)
+import GlobalConfig (HasGlobalConfig, GlobalConfig, defaultGlobalConfig, configBackupList, backupList)
 import Send ()
 import Snapshot (Snapshotable(..), takeSnapshot, snapshotBasePath)
 import SnapshotStore (Subvol(..), loadSnapshotStoreWithFilter, storeSnapshots, lookupSubvolPathToParent, validateSubvol)
 
 import Control.Exception.Base (displayException)
 import Control.Monad (forM_)
+import Control.Monad.Except (runExceptT)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Reader (MonadReader, ReaderT, runReaderT)
 import Data.Map.Strict (Map, fromList, assocs)
-import qualified Data.Map.Strict as Map (lookup)
 import Data.Maybe (fromMaybe)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
 import System.IO (hPutStrLn, stderr, stdout)
+import qualified Data.Map.Strict as Map (lookup)
 
-type VerbCommand = GlobalConfig -> [String] -> IO ()
+type VerbCommand = [String] -> ReaderT GlobalConfig IO ()
 
 data VerbInfo =
   VerbInfo
@@ -50,31 +53,33 @@ subvolumesToSnapshot =
 globalConfig :: GlobalConfig
 globalConfig = defaultGlobalConfig { configBackupList = subvolumesToSnapshot }
 
-snapshotMain :: VerbCommand
-snapshotMain config args = do
-  forM_ (configBackupList config) $ \subvolume -> do
-    result <- takeSnapshot subvolume
+snapshotMain :: (MonadReader env m, HasGlobalConfig env, MonadIO m) => [String] -> m ()
+snapshotMain args = do
+  theBackupList <- backupList
+  forM_ theBackupList $ \subvolume -> do
+    result <- liftIO $ runExceptT $ takeSnapshot subvolume
     case result of
-      Left str -> putStrLn $ displayException str
+      Left str -> liftIO $ putStrLn $ displayException str
       Right _ -> return ()
 
 snapshotVerb :: Verb
 snapshotVerb = ("snapshot", (mkVerbInfo snapshotMain) {verbBriefHelp = Just help})
   where help = "Take a snapshot right now"
 
-listMain :: VerbCommand
-listMain config args = do
-  forM_ (configBackupList config) $ \snapshotable -> do
-    putStrLn $ snapshotBasePath snapshotable ++ ":"
+listMain :: (MonadReader env m, HasGlobalConfig env, MonadIO m) => [String] -> m ()
+listMain args = do
+  theBackupList <- backupList
+  forM_ theBackupList $ \snapshotable -> do
+    liftIO $ putStrLn $ snapshotBasePath snapshotable ++ ":"
     let snapshotStorePath = subvolumePath snapshotable
     snapshotStore <- loadSnapshotStoreWithFilter snapshotStorePath $ \subvol -> do
       case validateSubvol subvol of
         Right _ -> return True
         Left str -> do
-          hPutStrLn stderr $ "Ignoring " ++ subvolPath subvol ++ ": " ++ str
+          liftIO $ hPutStrLn stderr $ "Ignoring " ++ subvolPath subvol ++ ": " ++ str
           return False
     forM_ (storeSnapshots snapshotStore) $ \subvol -> do
-      putStrLn $ subvolName subvol
+      liftIO $ putStrLn $ subvolName subvol
 
 listVerb :: Verb
 listVerb = ("list", (mkVerbInfo listMain) {verbBriefHelp = Just help})
@@ -86,31 +91,33 @@ verbs = fromList
   , listVerb
   ]
 
-usageVerb :: Maybe String -> VerbCommand
-usageVerb verbName _ _ = do
+usageVerb :: (MonadIO m) => Maybe String -> [String] -> m ()
+usageVerb verbName _ = do
   let isBad = case verbName of
                 Nothing -> False
                 Just _ -> True
   let stream = if isBad then stderr else stdout
   case verbName of
-    Nothing -> hPutStrLn stream "You must specify a command to perform"
-    Just name -> hPutStrLn stream $ "Unknown command: " ++ name
-  hPutStrLn stream "Commands:"
+    Nothing -> liftIO $ hPutStrLn stream "You must specify a command to perform"
+    Just name -> liftIO $ hPutStrLn stream $ "Unknown command: " ++ name
+  liftIO $ hPutStrLn stream "Commands:"
   forM_ (assocs verbs) $ \(name, info) ->
     case verbBriefHelp info of
-      Nothing -> hPutStrLn stream name
-      Just help -> hPutStrLn stream $ name ++ ": " ++ help
-  if isBad then exitFailure else return ()
+      Nothing -> liftIO $ hPutStrLn stream name
+      Just help -> liftIO $ hPutStrLn stream $ name ++ ": " ++ help
+  if isBad then liftIO $ exitFailure else return ()
 
-performVerb :: String -> VerbCommand
-performVerb verbName = fromMaybe (usageVerb $ Just verbName) $ command
+performVerb :: String -> [String] -> GlobalConfig -> IO ()
+performVerb verbName args config = runReaderT (verb args) config
   where info = Map.lookup verbName verbs
         command = fmap verbCommand info
+        verb = fromMaybe (usageVerb $ Just verbName) $ command
 
 main :: IO ()
 main = do
   args <- getArgs
   let config = globalConfig
   case args of
-    [] -> usageVerb Nothing config []
-    (verbName : otherArgs) -> performVerb verbName config otherArgs
+    [] -> usageVerb Nothing []
+    (verbName : otherArgs) -> do
+      performVerb verbName otherArgs config
